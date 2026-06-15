@@ -1,4 +1,4 @@
-// @ts-nocheck — TODO: Fix types for v2. See V2-619.
+// @ts-nocheck - TODO: Fix types for v2. See V2-619.
 /**
  * Zustand store slices for the Tent of Trials frontend.
  *

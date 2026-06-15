@@ -1,4 +1,4 @@
-// @ts-nocheck — TODO: Fix types for v2. See V2-619.
+// @ts-nocheck - TODO: Fix types for v2. See V2-619.
 /**
  * @fileoverview AI Chat Assistant  -  Multi-Provider LLM Chat with Context Management
  * 

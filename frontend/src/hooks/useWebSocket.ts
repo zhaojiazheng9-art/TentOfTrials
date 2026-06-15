@@ -1,4 +1,4 @@
-// @ts-nocheck — TODO: Fix types for v2. See V2-619.
+// @ts-nocheck - TODO: Fix types for v2. See V2-619.
 /**
  * Hook for managing WebSocket connections with automatic reconnection,
  * heartbeat, queue management, and multiplexed subscriptions.

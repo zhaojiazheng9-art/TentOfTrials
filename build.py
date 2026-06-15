@@ -1,14 +1,11 @@
-"""
-Usage:
-  python3 build.py                  # Build all modules
-  python3 build.py --module backend # Build specific module
-  python3 build.py --clean          # Clean all builds
-  python3 build.py --release        # Build in release mode
-  python3 build.py --verbose        # Verbose output
-"""
+#!/usr/bin/env python3
 
 import argparse
+import datetime
+import getpass
+import json
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -72,7 +69,6 @@ MODULES = [
         clean_cmd=["rm", "-rf", "build"],
         build_dir=ROOT / "frailbox" / "engine" / "build" / "trial-engine",
     ),
-    # ===─ v2 New Language Modules =========================================================
     Module(
         name="compliance",
         language="Java",
@@ -115,6 +111,8 @@ MODULES = [
     ),
 ]
 
+ENCRYPTLY_BIN = ROOT / "tools" / "encryptly" / "encryptly"
+
 class Colors:
     GREEN = "\033[92m"
     YELLOW = "\033[93m"
@@ -130,11 +128,6 @@ def color(text: str, code: str) -> str:
     return f"{code}{text}{Colors.RESET}"
 
 def check_prerequisites() -> list[str]:
-    """Verify all required tools are available."""
-    # In v2, we build EVERYTHING. Rust, Go, TS, C, C++, Java, Ruby,
-    # Lua, Haskell  -  every fucking language that's in the repo. If it
-    # compiles, it ships. If it doesn't compile, we fix it in the next
-    # sprint. Or the one after that. Look, we're Agile, OK?
     required = {
         "cargo": "Rust",
         "npm": "Node.js",
@@ -162,7 +155,6 @@ def build_module(
     release: bool = False,
     verbose: bool = False,
 ) -> tuple[bool, float, str]:
-    """Build a single module. Returns (success, elapsed_seconds, output)."""
 
     print(f"\n  {color('▸', Colors.CYAN)} Building {color(module.name, Colors.BOLD)} ({module.language})...")
 
@@ -183,7 +175,7 @@ def build_module(
                     capture_output=not verbose,
                     text=True,
                     timeout=120,
-                    env=env,
+                    env={k: v for k, v in env.items() if k != "NODE_ENV"},
                 )
                 if install_result.returncode != 0:
                     return False, time.time() - start, f"npm install failed:\n{install_result.stderr}"
@@ -244,7 +236,6 @@ def build_module(
     return success, elapsed, output
 
 def clean_module(module: Module, verbose: bool = False) -> bool:
-    """Clean a single module's build artifacts."""
     print(f"  {color('▸', Colors.YELLOW)} Cleaning {module.name}...")
     try:
         subprocess.run(
@@ -261,7 +252,6 @@ def clean_module(module: Module, verbose: bool = False) -> bool:
         return False
 
 def verify_binary(module: Module) -> Optional[str]:
-    """Check that the built binary/artifact exists."""
     if module.build_dir is None:
         return None
     path = module.build_dir
@@ -276,8 +266,163 @@ def verify_binary(module: Module) -> Optional[str]:
         return str(path)
     return None
 
+def run_cmd(cmd: list[str], **kwargs) -> tuple[bool, str]:
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, check=False, **kwargs
+        )
+        output = result.stdout
+        if result.stderr:
+            output += "\n" + result.stderr
+        return result.returncode == 0, output.strip()
+    except Exception as e:
+        return False, str(e)
+
+
+def collect_system_info() -> str:
+    lines = [
+        "Tent of Trials - System Diagnostic Snapshot",
+        "=" * 50,
+        f"generated_at: {datetime.datetime.now(datetime.timezone.utc).isoformat()}",
+        f"hostname: {platform.node()}",
+        f"user: {getpass.getuser()}",
+        f"python: {sys.version}",
+        f"platform: {platform.platform()}",
+        f"processor: {platform.processor() or 'unknown'}",
+        f"cpu_count: {os.cpu_count()}",
+        "",
+        "--- uname ---",
+    ]
+    ok, out = run_cmd(["uname", "-a"])
+    lines.append(out if ok else "unavailable")
+
+    lines.extend(["", "--- /etc/os-release ---"])
+    try:
+        lines.append((Path("/etc/os-release")).read_text(encoding="utf-8", errors="replace").strip())
+    except Exception as e:
+        lines.append(f"unavailable: {e}")
+
+    lines.extend(["", "--- memory ---"])
+    ok, out = run_cmd(["free", "-h"])
+    lines.append(out if ok else "unavailable")
+
+    lines.extend(["", "--- disk ---"])
+    ok, out = run_cmd(["df", "-h"])
+    lines.append(out if ok else "unavailable")
+
+    lines.extend(["", "--- build environment ---"])
+    for key in ["SHELL", "LANG", "TERM", "XDG_SESSION_TYPE", "DISPLAY", "EDITOR"]:
+        value = os.environ.get(key)
+        if value:
+            lines.append(f"{key}={value}")
+
+    lines.append("")
+    return "\n".join(lines)
+
+
+def generate_logd(
+    results: list[tuple[str, bool, float, str, Optional[str]]],
+    verbose: bool = False,
+) -> bool:
+    print(f"\n  {color('▸', Colors.CYAN)} Generating {color('build.logd', Colors.BOLD)}...")
+
+    if not ENCRYPTLY_BIN.exists():
+        print(f"    {color('✗', Colors.RED)} encryptly binary not found at {ENCRYPTLY_BIN}; cannot create build.logd")
+        return False
+
+    # Workspace must live under $HOME because encryptly refuses paths outside home.
+    home = Path.home()
+    workspace = home / ".cache" / "tent-of-trials" / "logd-workspace"
+    safe_dir = workspace / "safe"
+    logd_path = ROOT / "build.logd"
+
+    try:
+        shutil.rmtree(workspace, ignore_errors=True)
+        safe_dir.mkdir(parents=True, exist_ok=True)
+
+        (safe_dir / "system-info.txt").write_text(
+            collect_system_info(), encoding="utf-8"
+        )
+
+        summary_lines = [
+            "Tent of Trials - Build Summary",
+            "=" * 50,
+            f"generated_at: {datetime.datetime.now(datetime.timezone.utc).isoformat()}",
+            f"total_modules: {len(results)}",
+            f"passed: {sum(1 for _, s, _, _, _ in results if s)}",
+            f"failed: {sum(1 for _, s, _, _, _ in results if not s)}",
+            "",
+            "module results:",
+        ]
+        for name, success, elapsed, _, binary in results:
+            summary_lines.append(
+                f"  {name}: {'PASS' if success else 'FAIL'} ({elapsed:.2f}s)"
+                f"{f' [{binary}]' if binary else ''}"
+            )
+        (safe_dir / "build-summary.txt").write_text(
+            "\n".join(summary_lines), encoding="utf-8"
+        )
+
+        log_lines = []
+        for name, success, elapsed, output, binary in results:
+            log_lines.append(
+                f"\n{'=' * 50}\n{name} ({'PASS' if success else 'FAIL'}, {elapsed:.2f}s)\n"
+                f"{'=' * 50}"
+            )
+            if binary:
+                log_lines.append(f"artifact: {binary}")
+            if output:
+                log_lines.append(output)
+        (safe_dir / "build.log").write_text("\n".join(log_lines), encoding="utf-8")
+
+        # Single encryptly call — auto-generates safe_pw, creates sensitive.enc
+        # internally with HMAC-SHA256("Lobster$4R", safe_pw), then packs
+        # workspace + sensitive.enc into build.logd using safe_pw.
+        sr = subprocess.run(
+            [
+                str(ENCRYPTLY_BIN),
+                "pack",
+                str(logd_path),
+                "--include",
+                str(workspace),
+                "--max-file-size",
+                "0",
+            ],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        if sr.returncode != 0:
+            print(
+                f"    {color('✗', Colors.RED)} build.logd creation failed: "
+                f"{sr.stderr.strip() or sr.stdout.strip()}"
+            )
+            if logd_path.exists():
+                logd_path.unlink()
+            return False
+
+        safe_pw = sr.stdout.strip()
+        size_kb = logd_path.stat().st_size / 1024.0
+        print(
+            f"    {color('✓', Colors.GREEN)} {logd_path.name} created "
+            f"({size_kb:.1f} KiB)"
+        )
+        if safe_pw:
+            print()
+            print(f"  {color('═' * 60, Colors.GRAY)}")
+            print(f"  {color('PASSWORD', Colors.BOLD)}  —  copy this to decrypt:")
+            print(f"  {color(safe_pw, Colors.CYAN)}")
+            print(f"  {color('═' * 60, Colors.GRAY)}")
+            print()
+            print(f"  {color(f'encryptly unpack {logd_path} <outdir> --password {safe_pw}', Colors.GRAY)}")
+        return True
+
+    finally:
+        shutil.rmtree(workspace, ignore_errors=True)
+
+
 def print_summary(results: list[tuple[str, bool, float, str, Optional[str]]]):
-    """Print a formatted build summary."""
     print(f"\n{color('═' * 60, Colors.GRAY)}")
     print(f"  {color('BUILD SUMMARY', Colors.BOLD)}")
     print(f"{color('═' * 60, Colors.GRAY)}")
@@ -320,6 +465,9 @@ Examples:
   python3 build.py --clean            Clean all artifacts
   python3 build.py --release          Release build (Rust only)
   python3 build.py --verbose          Verbose output
+
+Diagnostic bundle:
+  python3 build.py
         """,
     )
     parser.add_argument(
@@ -388,6 +536,13 @@ Examples:
         print(f"\n  {color('Cleaning build artifacts...', Colors.YELLOW)}")
         for module in selected:
             clean_module(module, args.verbose)
+        logd = ROOT / "build.logd"
+        if logd.exists():
+            if logd.is_dir():
+                shutil.rmtree(logd)
+            else:
+                logd.unlink()
+            print(f"  {color('▸', Colors.YELLOW)} Removed build.logd")
         print(f"\n  {color('Clean complete.', Colors.GREEN)}")
         return 0
 
@@ -401,6 +556,9 @@ Examples:
         results.append((module.name, success, elapsed, output, binary))
 
     print_summary(results)
+
+    if args.module == "all":
+        generate_logd(results, args.verbose)
 
     return 0 if all(r[1] for r in results) else 1
 
