@@ -16,6 +16,7 @@ from typing import Optional
 
 ROOT = Path(__file__).resolve().parent
 DIAGNOSTIC_DIR = ROOT / "diagnostic"
+DIAGNOSTIC_CHUNK_SIZE = 40 * 1024 * 1024
 
 
 def current_commit_id() -> str:
@@ -43,6 +44,28 @@ def diagnostic_paths_for_commit() -> tuple[Path, Path, str]:
     logd_path = DIAGNOSTIC_DIR / f"build-{commit_id}.logd"
     metadata_path = DIAGNOSTIC_DIR / f"build-{commit_id}-metadata.json"
     return logd_path, metadata_path, commit_id
+
+
+def split_diagnostic_logd(logd_path: Path, chunk_size: int = DIAGNOSTIC_CHUNK_SIZE) -> list[Path]:
+    """Split an oversized .logd into numbered .logd chunks and remove the original."""
+    if logd_path.stat().st_size <= chunk_size:
+        return [logd_path]
+
+    chunks: list[Path] = []
+    stem = logd_path.stem
+    with logd_path.open("rb") as source:
+        index = 1
+        while True:
+            data = source.read(chunk_size)
+            if not data:
+                break
+            chunk_path = logd_path.with_name(f"{stem}-part{index:03d}.logd")
+            chunk_path.write_bytes(data)
+            chunks.append(chunk_path)
+            index += 1
+
+    logd_path.unlink()
+    return chunks
 
 
 @dataclass
@@ -489,12 +512,18 @@ def generate_logd(
             return False
 
         safe_pw = sr.stdout.strip()
+        logd_files = split_diagnostic_logd(logd_path)
+        logd_relpaths = [str(path.relative_to(ROOT)) for path in logd_files]
+        diagnostic_logd = logd_relpaths[0] if len(logd_relpaths) == 1 else logd_relpaths
+        decrypt_target = logd_relpaths[0] if len(logd_relpaths) == 1 else str(logd_path.relative_to(ROOT))
         metadata = {
             "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "commit": commit_id,
-            "diagnostic_logd": str(logd_path.relative_to(ROOT)),
+            "diagnostic_logd": diagnostic_logd,
+            "chunked": len(logd_files) > 1,
+            "chunk_size_bytes": DIAGNOSTIC_CHUNK_SIZE if len(logd_files) > 1 else None,
             "password": safe_pw,
-            "decrypt_command": f"encryptly unpack {logd_path.relative_to(ROOT)} <outdir> --password {safe_pw}",
+            "decrypt_command": f"encryptly unpack {decrypt_target} <outdir> --password {safe_pw}",
             "total_modules": len(results),
             "passed": sum(1 for _, s, _, _, _ in results if s),
             "failed": sum(1 for _, s, _, _, _ in results if not s),
@@ -508,26 +537,34 @@ def generate_logd(
                 for name, success, elapsed, _, binary in results
             ],
             "pr_note": (
-                f"Include this metadata and {logd_path.relative_to(ROOT)} in your PR. "
+                f"Include this metadata and {', '.join(logd_relpaths)} in your PR. "
                 "Maintainers may ask you to remove these diagnostic artifacts before merging."
             ),
         }
         metadata_path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
 
-        size_kb = logd_path.stat().st_size / 1024.0
-        print(
-            f"    {color('✓', Colors.GREEN)} {logd_path.relative_to(ROOT)} created "
-            f"({size_kb:.1f} KiB)"
-        )
+        for path in logd_files:
+            size_kb = path.stat().st_size / 1024.0
+            print(
+                f"    {color('✓', Colors.GREEN)} {path.relative_to(ROOT)} created "
+                f"({size_kb:.1f} KiB)"
+            )
+        if len(logd_files) > 1:
+            print(
+                f"    {color('✓', Colors.GREEN)} split oversized diagnostic log into "
+                f"{len(logd_files)} chunks of at most {DIAGNOSTIC_CHUNK_SIZE // (1024 * 1024)} MiB"
+            )
         print(f"    {color('✓', Colors.GREEN)} {metadata_path.relative_to(ROOT)} created")
         if safe_pw:
             print()
-            print(f"  {color('Password', Colors.BOLD)} - this is required to decrypt {logd_path.relative_to(ROOT)},")
+            print(f"  {color('Password', Colors.BOLD)} - this is required to decrypt the diagnostic log,")
             print(f"             which is required to submit a PR. Upload the")
-            print(f"             diagnostic log and metadata file with this password.")
-            print(f"          NOTE: split into binary chunks if it is too big to track for GitHub.")
+            print(f"             diagnostic log file(s) and metadata file with this password.")
+            if len(logd_files) > 1:
+                print(f"             Reassemble chunks in order before unpacking:")
+                print(f"             cat {' '.join(logd_relpaths)} > {logd_path.relative_to(ROOT)}")
             print(f"  {color(safe_pw, Colors.CYAN)}")
-            print(f"  {color(f'encryptly unpack {logd_path.relative_to(ROOT)} <outdir> --password {safe_pw}', Colors.GRAY)}")
+            print(f"  {color(f'encryptly unpack {decrypt_target} <outdir> --password {safe_pw}', Colors.GRAY)}")
         return True
 
     finally:
@@ -605,7 +642,6 @@ Diagnostic bundle:
     args = parser.parse_args()
 
     print(f"\n  {color('Tent of Trials: building', Colors.CYAN)}")
-    print(f"  {color(f'v0.1.0 | Python {sys.version.split()[0]}', Colors.GRAY)}")
     print(f"  Working directory: {ROOT}")
     print()
 
@@ -650,6 +686,7 @@ Diagnostic bundle:
         diagnostic_artifacts = [ROOT / "build.logd"]
         if DIAGNOSTIC_DIR.exists():
             diagnostic_artifacts.extend(DIAGNOSTIC_DIR.glob("build-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f].logd"))
+            diagnostic_artifacts.extend(DIAGNOSTIC_DIR.glob("build-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]-part*.logd"))
             diagnostic_artifacts.extend(DIAGNOSTIC_DIR.glob("build-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]-metadata.json"))
         for artifact in diagnostic_artifacts:
             if artifact.exists():
