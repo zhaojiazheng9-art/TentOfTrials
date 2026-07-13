@@ -656,10 +656,11 @@ Diagnostic bundle:
     print(f"  {color('Checking prerequisites...', Colors.GRAY)}")
     missing = check_prerequisites()
     if missing:
-        print(f"\n  {color('⚠ Some tools missing  -  will try anyway:', Colors.YELLOW)}")
+        print(f"\n  {color('Some tools missing  -  will try anyway:', Colors.YELLOW)}")
         for m in missing:
             print(f"    {m}")
-        print(f"  {color('Not all modules will build. That\'s fine.', Colors.GRAY)}")
+        msg = "Not all modules will build. That's fine."
+        print(f"  {color(msg, Colors.GRAY)}")
     else:
         print(f"  {color('✓ All prerequisites found', Colors.GREEN)}")
 
