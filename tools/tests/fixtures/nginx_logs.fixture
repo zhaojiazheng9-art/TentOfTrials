@@ -1,0 +1,9 @@
+# Nginx Access Log Fixtures — hand-written representative log lines
+# Standard combined log format: $remote_addr - $remote_user [$time_local] "$request" $status $body_bytes "$http_referer" "$http_user_agent"
+
+192.168.1.1 - - [19/Jun/2026:08:15:30 +0000] "GET /v1/users HTTP/1.1" 200 1234 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+10.0.0.5 - admin [19/Jun/2026:08:15:31 +0000] "POST /api/auth/login HTTP/1.1" 401 89 "-" "curl/8.4.0"
+203.0.113.42 - - [19/Jun/2026:08:16:00 +0000] "GET /health HTTP/1.1" 200 15 "-" "kube-probe/1.28"
+198.51.100.7 - - [19/Jun/2026:08:17:45 +0000] "POST /api/orders HTTP/1.1" 500 245 "-" "Shopify/1.0"
+192.168.1.1 - - [19/Jun/2026:09:00:00 +0000] "GET /v1/users?page=2 HTTP/1.1" 200 5678 "https://example.com/dashboard" "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+10.0.0.10 - - [20/Jun/2026:00:00:00 +0000] "DELETE /api/sessions/old HTTP/1.1" 204 0 "-" "internal-cron/1.0"
