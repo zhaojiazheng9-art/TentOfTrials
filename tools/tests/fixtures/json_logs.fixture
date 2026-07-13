@@ -1,0 +1,10 @@
+# JSON Log Fixtures — hand-written, not parser-generated
+# Each line is a complete JSON log entry.
+
+{"timestamp": "2026-06-19T08:15:30Z", "level": "INFO", "service": "api-gateway", "message": "Request received: GET /v1/users", "request_id": "req-abc123"}
+{"timestamp": "2026-06-19T08:15:31Z", "level": "ERROR", "service": "auth-service", "message": "Authentication failed: invalid token", "user_id": "usr-999"}
+{"timestamp": "2026-06-19T08:16:00Z", "level": "WARN", "service": "payment-worker", "message": "Retry attempt 2/3 for transaction tx-456", "tx_id": "tx-456"}
+{"timestamp": "2026-06-19T08:17:45Z", "level": "DEBUG", "service": "db-pool", "message": "Connection pool stats: active=12 idle=5 waiting=0"}
+{"time": "2026-06-19T09:00:00Z", "severity": "CRITICAL", "logger": "order-service", "msg": "Out of memory in order processing pipeline"}
+{"@timestamp": "2026-06-19T10:30:00Z", "lvl": "ERROR", "app": "notification-svc", "event": "Failed to send push notification to device: timeout"}
+{"timestamp": "2026-06-20T00:00:00Z", "level": "INFO", "service": "scheduler", "message": "Daily cleanup job started"}
