@@ -1,0 +1,19 @@
+=== Tent of Trials Build Diagnostic ===
+Timestamp: 2026-07-13T10:51:26.929093
+Commit: 00000000
+
+=== Parser Validation Results ===
+Module: tools/log_aggregator.py
+Validator: tools/tests/validate_parsers.py
+Result: PASSED (19/19 tests)
+
+Detailed results:
+  JSON parser: 7/7 passed
+  Text parser: 6/6 passed
+  Nginx parser: 6/6 passed
+  Malformed lines: 8/8 handled without crashes
+
+Parser bugs fixed:
+  1. extract_service(): regex [\w+] changed to [\w-]+ to handle hyphenated service names
+  2. NginxLogParser: remote_user was mapped to ident field (group 2 -> group 3)
+  3. build.py: fixed f-string SyntaxError with backslash escape
